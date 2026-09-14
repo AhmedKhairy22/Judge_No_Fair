@@ -3,7 +3,7 @@
 - Employers can create, publish, update, and close job listings.
 - Candidates can apply for jobs and track their application status.
 - Candidates and employers can query items with multi-attribute filtering (skills, pay range, experience level, text keywords).
-- The system asynchronously generates ranked job recommendations for candidates and candidate leads for employers.
+- The system asynchronously generates ranked job recommendations for candidates, and candidate leads for employers.
 - The system enforces unique constraints on (CandidateID, JobID) pairs
 - The system prevents invalid application actions, such as moving a rejected application back to the interview stage.
 - Employers can manage the hiring pipeline from application screening to interviews, offers, or rejection.
@@ -48,21 +48,29 @@ Stores candidate-specific information.
 - Career goals
 - Portfolio
 - Target roles
+  
+### Company
+Represents the employer organization itself
+CompanyID
+Name
+Industry
+Location
+Description/website
 
 ### Employer
-Stores employer/company information.
+Represents an individual employer-side user (e.g., a recruiter or hiring manager) belonging to a company.
 
 - EmployerID
 - UserID
-- Company information
-- Industry
-- Location
+- CompanyID (FK → Company)
+- Role/title within company (optional, e.g., "Recruiter", "Admin")
 
 ### Job
 Represents a job published by an employer.
 
 - JobID
-- EmployerID
+- CompanyID
+- PostedByEmployerID
 - Title
 - Description
 - Required skills
@@ -92,20 +100,22 @@ Stores the history of an application's state changes.
 - Previous status
 - New status
 - ChangedAt
+- ChangedBy
 
 This allows us to track the complete hiring pipeline and maintain an audit trail.
 
-### Skill & CandidateSkill
-Skills are modeled separately so they can be shared across candidates and jobs.
-
+### Skill
+A shared, normalized catalog of all known skills
 - SkillID
 - Skill name
+- Category
+
+### CandidateSkill
 - CandidateID
+- SkillID
 - Skill level
-
+  
 ### JobSkill
-Represents the skills required or preferred for a job.
-
 - JobID
 - SkillID
 - Requirement type
@@ -113,8 +123,8 @@ Represents the skills required or preferred for a job.
 
 This structure makes skill matching and skill-gap analysis easier.
 
-### SkillGap / CareerGoal
-Stores a candidate's target role and the result of comparing their current skills with the target job requirements.
+### SkillGap 
+Stores the result of comparing a candidate's skills against a target job/role
 
 - CandidateID
 - TargetJob/Role
@@ -147,3 +157,28 @@ Stores notification events and delivery status.
 - SentAt
 ### One small architectural point
 I chose to keep candidate, job, profile, and application data in the core relational database as the authoritative source of truth. And the recommendation system is not a separate source of truth. It consumes this data, calculates recommendations, and stores the results. This keeps the core data consistent while allowing recommendation logic to evolve independently
+
+# API Design
+
+I chose a RESTful HTTP architecture for client-facing operations because the domain revolves around well-defined, persistent resources (Jobs, Profiles, Applications). REST allows us to cleanly decouple clients, scale stateless API servers horizontally behind a load balancer, and leverage standard HTTP caching for high-frequency queries like job listings.
+
+However, operations that require heavy computation (such as candidate matching feeds) or external delivery (such as push/email notifications) do not run synchronously inside the request-response cycle. Instead, REST endpoints accept or mutate state, emit domain events via an asynchronous message broker, and return immediate responses.
+
+| Endpoint | Request | Response | Purpose |
+|---|---|---|---|
+| `POST /users/{userId}/profile` | Profile data: education, skills, experience, goals | Profile | Create/update candidate profile |
+| `POST /jobs` | Job details, requirements, salary, etc. | Job ID + status | Create a job |
+| `PATCH /jobs/{jobId}` | Fields to update / status | Updated job | Update, publish, or close a job |
+| `GET /jobs` | Filters: keywords, skills, pay, experience, pagination | Paginated jobs | Job search |
+| `GET /candidates` | Filters: keywords, skills, experience, pagination | Paginated candidates | Candidate search |
+| `POST /jobs/{jobId}/applications` | Candidate ID | Application ID + status | Apply for a job |
+| `GET /candidates/{candidateId}/applications` | Pagination/filter | Applications + statuses | Track applications |
+| `PATCH /applications/{applicationId}/status` | New status | Updated application | Manage hiring pipeline |
+| `GET /candidates/{candidateId}/recommendations` | Pagination | Ranked jobs | Get job recommendations |
+| `GET /jobs/{jobId}/recommendations` | Pagination | Ranked candidates | Get candidate recommendations |
+| `POST /candidates/{candidateId}/skill-gap` | Target job ID | Missing/improvable skills | Perform skill-gap analysis |
+
+# High-Level Architecture
+To handle Carieeer’s load, maintain transactional integrity, and deliver fast search and recommendations, I chose a **Modular Monolith transitioning to Microservices**. I keep the core transactional operations-User Profiles, Job Management, and Applications- under strong ACID guarantees, while I decouple high-throughput operations such as Search and background workloads like Matching, Skill-Gap Analysis, and Notifications through an Event Bus / Message Broker.
+
+
