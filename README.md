@@ -181,4 +181,6 @@ However, operations that require heavy computation (such as candidate matching f
 # High-Level Architecture
 To handle Carieeer’s load, maintain transactional integrity, and deliver fast search and recommendations, I chose a **Modular Monolith transitioning to Microservices**. I keep the core transactional operations-User Profiles, Job Management, and Applications- under strong ACID guarantees, while I decouple high-throughput operations such as Search and background workloads like Matching, Skill-Gap Analysis, and Notifications through an Event Bus / Message Broker.
 
+![High-Level Architecture](./High-Level%20Architecture.png)
+
 
